@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/pyrohost/pyrodactyl/actions/workflows/docker.yaml">
-    <img src="https://i.postimg.cc/HsxbBGM1/Badge-Docker.png" alt="Docker">
+    <img src="https://i.postimg.cc/1tBNrM5s/t-l-chargement-9.png" alt="Docker">
   </a>
 </p>
 
