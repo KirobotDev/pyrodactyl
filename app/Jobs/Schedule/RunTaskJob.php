@@ -6,11 +6,12 @@ use Exception;
 use Pterodactyl\Jobs\Job;
 use Carbon\CarbonImmutable;
 use Pterodactyl\Models\Task;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\DispatchesJobs;
-use Pterodactyl\Services\Backups\InitiateBackupService;
+use Pterodactyl\Services\Elytra\ElytraJobService;
 use Pterodactyl\Repositories\Wings\DaemonPowerRepository;
 use Pterodactyl\Repositories\Wings\DaemonCommandRepository;
 use Pterodactyl\Exceptions\Http\Connection\DaemonConnectionException;
@@ -21,9 +22,6 @@ class RunTaskJob extends Job implements ShouldQueue
     use InteractsWithQueue;
     use SerializesModels;
 
-    /**
-     * RunTaskJob constructor.
-     */
     public function __construct(public Task $task, public bool $manualRun = false)
     {
         $this->queue = 'standard';
@@ -36,7 +34,7 @@ class RunTaskJob extends Job implements ShouldQueue
      */
     public function handle(
         DaemonCommandRepository $commandRepository,
-        InitiateBackupService $backupService,
+        ElytraJobService $elytraJobService,
         DaemonPowerRepository $powerRepository,
     ) {
         // Do not process a task that is not set to active, unless it's been manually triggered.
@@ -68,20 +66,43 @@ class RunTaskJob extends Job implements ShouldQueue
                     $commandRepository->setServer($server)->send($this->task->payload);
                     break;
                 case Task::ACTION_BACKUP:
-                    // Mark the task as running before initiating the backup to prevent duplicate runs
-                    $this->task->update(['is_processing' => true]);
-                    $backupService->setIgnoredFiles(explode(PHP_EOL, $this->task->payload))->handle($server, null, true);
-                    $this->task->update(['is_processing' => false]);
+                    $affectedRows = Task::where('id', $this->task->id)
+                        ->where('is_processing', false)
+                        ->update(['is_processing' => true]);
+
+                    if ($affectedRows === 0) {
+                        Log::warning('Backup task already processing, skipping', [
+                            'task_id' => $this->task->id,
+                            'schedule_id' => $this->task->schedule_id,
+                            'server_id' => $server->id,
+                        ]);
+                        return;
+                    }
+
+                    try {
+                        $ignoredFiles = !empty($this->task->payload) ? explode(PHP_EOL, $this->task->payload) : [];
+
+                        $elytraJobService->submitJob(
+                            $server,
+                            'backup_create',
+                            [
+                                'operation' => 'create',
+                                'adapter' => config('backups.default', 'elytra'),
+                                'ignored' => implode("\n", $ignoredFiles),
+                                'name' => 'Scheduled Backup - ' . now()->format('Y-m-d H:i'),
+                                'is_automatic' => true,
+                            ],
+                            auth()->user() ?? $server->user
+                        );
+                    } finally {
+                        $this->task->update(['is_processing' => false]);
+                        $this->task->schedule->touch();
+                    }
                     break;
                 default:
                     throw new \InvalidArgumentException('Invalid task action provided: ' . $this->task->action);
             }
         } catch (\Exception $exception) {
-            // Reset the processing flag if there was an error
-            if ($this->task->action === Task::ACTION_BACKUP) {
-                $this->task->update(['is_processing' => false]);
-            }
-            
             // If this isn't a DaemonConnectionException on a task that allows for failures
             // throw the exception back up the chain so that the task is stopped.
             if (!($this->task->continue_on_failure && $exception instanceof DaemonConnectionException)) {
@@ -90,6 +111,7 @@ class RunTaskJob extends Job implements ShouldQueue
         }
 
         $this->markTaskNotQueued();
+        $this->task->schedule->touch();
         $this->queueNextTask();
     }
 
@@ -98,7 +120,12 @@ class RunTaskJob extends Job implements ShouldQueue
      */
     public function failed(?\Exception $exception = null)
     {
+        if ($this->task->action === Task::ACTION_BACKUP) {
+            $this->task->update(['is_processing' => false]);
+        }
+
         $this->markTaskNotQueued();
+        $this->task->schedule->touch();
         $this->markScheduleComplete();
     }
 

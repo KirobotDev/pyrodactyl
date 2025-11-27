@@ -37,12 +37,50 @@ body:
   validations:
     required: true
 
+- type: checkboxes
+  attributes:
+    label: Panel Installation Type
+    description: How did you install Panel?
+    options:
+    - label: Official Panel Docker image.
+      required: false
+    - label: native install for Panel.
+      required: false
+    # - label: I used official installation script.
+    #   required: false
+    - label: I used a third party installation script or Docker image.
+      required: false
+  validations:
+    required: true
+
 - type: input
   id: wings-version
   attributes:
-    label: Wings Version
-    description: Version number of your Wings (latest is not a version)
+    label: Daemon Version
+    description: Version number of your Elytra(Or Wings) (latest is not a version)
     placeholder: 1.4.2
+  validations:
+    required: true
+
+- type: checkboxes
+  attributes:
+    label: Daemon Installation Type
+    description: How did you install Wings?
+    options:
+    - label: Offical Docker image.
+      required: false
+    - label: Native install.
+      required: false
+    - label: Pyrodactyl Elytra
+      required: false
+    - label: Pterodacty Wings
+      required: false
+    # - label: I used official installation script.
+    #   required: false
+    - label: I used a third party installation script or Docker image.
+      required: false
+    - label: Daemon Version does not apply to this Bug
+      required: false
   validations:
     required: true
 
@@ -85,3 +123,5 @@ body:
       required: true
     - label: I have checked in the Discord server and believe this is a bug with the software, and not a configuration issue with my specific system.
       required: true
+
+# rawr
